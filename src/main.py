@@ -86,3 +86,20 @@ def check_kosis():
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}
+@app.get("/kosis")
+def kosis(orgId: str, tblId: str, prdSe: str = "Y", startPrdDe: str = "2020", endPrdDe: str = "2020", objL1: str = "0", objL2: str = "0", itmId: str = "T1"):
+    import os, requests
+    api_key = os.environ.get("KOSIS_API_KEY")
+    if not api_key:
+        return {"ok": False, "error": "환경변수 없음"}
+
+    url = "http://kosis.kr/openapi/Param/statisticsParameterData.do"
+    params = {
+        "method": "getList",
+        "apiKey": api_key,
+        "orgId": orgId,
+        "tblId": tblId,
+        "prdSe": prdSe,
+        "startPrdDe": startPrdDe,
+        "endPrdDe": endPrdDe,
+        "objL1": objL1
