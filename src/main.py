@@ -131,7 +131,9 @@ def query_agency(
     endPrdDe: str = "2020",
     prdSe: str = "Y"
 ):
-    import os, requests
+    import os, requests, json, re
+    
+    # 환경변수에서 기관별 API 키
     keys = {
         "kosis": os.environ.get("KOSIS_API_KEY"),
         "law": os.environ.get("LAW_API_KEY"),
@@ -142,51 +144,73 @@ def query_agency(
         return {"ok": False, "error": f"{agency} API 키 없음"}
     api_key = keys[agency]
 
-    if agency == "kosis":
-        # 1단계: 검색
-        search_url = "http://kosis.kr/openapi/Param/statisticsParameterData.do"
-        search_params = {
-            "method": "getStatList",
-            "apiKey": api_key,
-            "format": "json",
-            "keyword": keyword
-        }
-        sr = requests.get(search_url, params=search_params, timeout=10)
-        if not sr.ok:
-            return {"ok": False, "status": sr.status_code, "error": sr.text}
-        tables = sr.json()
-        if not tables:
-            return {"ok": False, "error": "검색 결과 없음"}
+    def fix_nonstandard_json(text):
+        # {속성: 값} → {"속성": 값}
+        return re.sub(r'([{,])(\s*)([A-Za-z0-9_]+):', r'\1"\3":', text)
 
-        # 첫 번째 표 선택
-        best = tables[0]
-        orgId = best.get("ORG_ID")
-        tblId = best.get("TBL_ID")
+    try:
+        if agency == "kosis":
+            base_url = "http://kosis.kr/openapi/Param/statisticsParameterData.do"
 
-        # 2단계: 데이터 조회
-        data_params = {
-            "method": "getList",
-            "apiKey": api_key,
-            "orgId": orgId,
-            "tblId": tblId,
-            "prdSe": prdSe,
-            "startPrdDe": startPrdDe,
-            "endPrdDe": endPrdDe,
-            "format": "json",
-            "objL1": "ALL",
-            "itmId": "ALL"
-        }
-        dr = requests.get(search_url, params=data_params, timeout=10)
-        return {
-            "ok": dr.ok,
-            "status": dr.status_code,
-            "selected_table": {
-                "TBL_ID": tblId,
-                "ORG_ID": orgId,
-                "TBL_NM": best.get("TBL_NM"),
-                "ORG_NM": best.get("ORG_NM"),
-            },
-            "preview": dr.text[:500]
-        }
-    else:
-        return {"ok": False, "error": "아직 구현되지 않은 기관"}
+            # 1단계: 검색
+            search_params = {
+                "method": "getStatList",
+                "apiKey": api_key,
+                "format": "json",
+                "keyword": keyword
+            }
+            sr = requests.get(base_url, params=search_params, timeout=10)
+            if not sr.ok:
+                return {"ok": False, "status": sr.status_code, "error": sr.text}
+
+            try:
+                tables = sr.json()
+            except:
+                fixed = fix_nonstandard_json(sr.text)
+                tables = json.loads(fixed)
+
+            if not tables:
+                return {"ok": False, "error": "검색 결과 없음"}
+
+            # 첫 번째 표 선택
+            best = tables[0]
+            orgId = best.get("ORG_ID")
+            tblId = best.get("TBL_ID")
+
+            # 2단계: 데이터 조회
+            data_params = {
+                "method": "getList",
+                "apiKey": api_key,
+                "orgId": orgId,
+                "tblId": tblId,
+                "prdSe": prdSe,
+                "startPrdDe": startPrdDe,
+                "endPrdDe": endPrdDe,
+                "format": "json",
+                "objL1": "ALL",
+                "itmId": "ALL"
+            }
+            dr = requests.get(base_url, params=data_params, timeout=10)
+
+            try:
+                data_json = dr.json()
+            except:
+                fixed_data = fix_nonstandard_json(dr.text)
+                data_json = json.loads(fixed_data)
+
+            return {
+                "ok": True,
+                "selected_table": {
+                    "TBL_ID": tblId,
+                    "ORG_ID": orgId,
+                    "TBL_NM": best.get("TBL_NM"),
+                    "ORG_NM": best.get("ORG_NM"),
+                },
+                "data_count": len(data_json) if isinstance(data_json, list) else None,
+                "data_preview": data_json[:3] if isinstance(data_json, list) else data_json
+            }
+        else:
+            return {"ok": False, "error": "아직 구현되지 않은 기관"}
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
