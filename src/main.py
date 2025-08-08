@@ -1,3 +1,5 @@
+import os
+print("DEBUG  KOSIS_API_KEY:", os.environ.get("KOSIS_API_KEY"))
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import os
