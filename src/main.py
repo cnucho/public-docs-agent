@@ -133,10 +133,8 @@ def query_agency(
 ):
     import os, requests, json, re
     
-    # 환경변수에서 기관별 API 키
     keys = {
         "kosis": os.environ.get("KOSIS_API_KEY"),
-        "law": os.environ.get("LAW_API_KEY"),
     }
     if agency not in keys:
         return {"ok": False, "error": f"지원하지 않는 기관: {agency}"}
@@ -144,15 +142,14 @@ def query_agency(
         return {"ok": False, "error": f"{agency} API 키 없음"}
     api_key = keys[agency]
 
-    def fix_nonstandard_json(text):
-        # {속성: 값} → {"속성": 값}
+    def fix_json(text):
         return re.sub(r'([{,])(\s*)([A-Za-z0-9_]+):', r'\1"\3":', text)
 
     try:
         if agency == "kosis":
             base_url = "http://kosis.kr/openapi/Param/statisticsParameterData.do"
-
-            # 1단계: 검색
+            
+            # 1) 검색
             search_params = {
                 "method": "getStatList",
                 "apiKey": api_key,
@@ -160,24 +157,26 @@ def query_agency(
                 "keyword": keyword
             }
             sr = requests.get(base_url, params=search_params, timeout=10)
+            raw_text = sr.text
             if not sr.ok:
-                return {"ok": False, "status": sr.status_code, "error": sr.text}
+                return {"ok": False, "status": sr.status_code, "raw": raw_text}
 
             try:
                 tables = sr.json()
             except:
-                fixed = fix_nonstandard_json(sr.text)
-                tables = json.loads(fixed)
+                try:
+                    tables = json.loads(fix_json(raw_text))
+                except:
+                    return {"ok": False, "error": "검색결과 파싱 실패", "raw": raw_text}
 
-            if not tables:
-                return {"ok": False, "error": "검색 결과 없음"}
+            if not isinstance(tables, list) or not tables:
+                return {"ok": False, "error": "검색 결과 없음", "raw": tables}
 
-            # 첫 번째 표 선택
             best = tables[0]
             orgId = best.get("ORG_ID")
             tblId = best.get("TBL_ID")
 
-            # 2단계: 데이터 조회
+            # 2) 데이터 조회
             data_params = {
                 "method": "getList",
                 "apiKey": api_key,
@@ -191,12 +190,14 @@ def query_agency(
                 "itmId": "ALL"
             }
             dr = requests.get(base_url, params=data_params, timeout=10)
-
+            data_text = dr.text
             try:
                 data_json = dr.json()
             except:
-                fixed_data = fix_nonstandard_json(dr.text)
-                data_json = json.loads(fixed_data)
+                try:
+                    data_json = json.loads(fix_json(data_text))
+                except:
+                    return {"ok": False, "error": "데이터 파싱 실패", "raw": data_text}
 
             return {
                 "ok": True,
@@ -209,8 +210,6 @@ def query_agency(
                 "data_count": len(data_json) if isinstance(data_json, list) else None,
                 "data_preview": data_json[:3] if isinstance(data_json, list) else data_json
             }
-        else:
-            return {"ok": False, "error": "아직 구현되지 않은 기관"}
 
     except Exception as e:
         return {"ok": False, "error": str(e)}
