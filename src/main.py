@@ -87,7 +87,16 @@ def check_kosis():
     except Exception as e:
         return {"ok": False, "error": str(e)}
 @app.get("/kosis")
-def kosis(orgId: str, tblId: str, prdSe: str = "Y", startPrdDe: str = "2020", endPrdDe: str = "2020", objL1: str = "0", objL2: str = "0", itmId: str = "T1"):
+def kosis(
+    orgId: str,
+    tblId: str,
+    prdSe: str = "Y",
+    startPrdDe: str = "2020",
+    endPrdDe: str = "2020",
+    objL1: str = "0",
+    objL2: str = "0",
+    itmId: str = "T1"
+):
     import os, requests
     api_key = os.environ.get("KOSIS_API_KEY")
     if not api_key:
@@ -102,4 +111,15 @@ def kosis(orgId: str, tblId: str, prdSe: str = "Y", startPrdDe: str = "2020", en
         "prdSe": prdSe,
         "startPrdDe": startPrdDe,
         "endPrdDe": endPrdDe,
-        "objL1": objL1
+        "objL1": objL1,
+        "objL2": objL2,
+        "itmId": itmId,
+        "format": "json",
+    }
+    r = requests.get(url, params=params, timeout=12)
+    return {
+        "ok": r.ok,
+        "status": r.status_code,
+        "url": r.url,
+        "preview": r.text[:500]
+    }
