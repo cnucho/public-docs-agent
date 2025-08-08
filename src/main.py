@@ -123,3 +123,83 @@ def kosis(
         "url": r.url,
         "preview": r.text[:500]
     }
+@app.get("/query")
+def query_agency(
+    agency: str,
+    keyword: str,
+    startPrdDe: str = "2020",
+    endPrdDe: str = "2020",
+    prdSe: str = "Y"
+):
+    import os, requests
+    
+    # 환경변수에서 기관별 API 키 읽기
+    keys = {
+        "kosis": os.environ.get("KOSIS_API_KEY"),
+        "law": os.environ.get("LAW_API_KEY"),
+    }
+    
+    if agency not in keys:
+        return {"ok": False, "error": f"지원하지 않는 기관: {agency}"}
+    if not keys[agency]:
+        return {"ok": False, "error": f"{agency} API 키 없음"}
+    
+    api_key = keys[agency]
+    
+    try:
+        if agency == "kosis":
+            # 1단계: 검색
+            search_url = "http://kosis.kr/openapi/Param/statisticsParameterData.do"
+            search_params = {
+                "method": "getStatList",
+                "apiKey": api_key,
+                "format": "json",
+                "keyword": keyword
+            }
+            sr = requests.get(search_url, params=search_params, timeout=10)
+            if not sr.ok:
+                return {"ok": False, "status": sr.status_code, "error": sr.text}
+            tables = sr.json()
+            if not tables:
+                return {"ok": False, "error": "검색 결과 없음"}
+            
+            # 가장 첫 번째 표 선택 (원하면 다른 랭킹 방식 적용 가능)
+            best = tables[0]
+            orgId = best.get("ORG_ID")
+            tblId = best.get("TBL_ID")
+            
+            # 2단계: 데이터 조회
+            data_params = {
+                "method": "getList",
+                "apiKey": api_key,
+                "orgId": orgId,
+                "tblId": tblId,
+                "prdSe": prdSe,
+                "startPrdDe": startPrdDe,
+                "endPrdDe": endPrdDe,
+                "format": "json",
+                "objL1": "ALL",
+                "itmId": "ALL"
+            }
+            dr = requests.get(search_url, params=data_params, timeout=10)
+            return {
+                "ok": dr.ok,
+                "status": dr.status_code,
+                "selected_table": {
+                    "TBL_ID": tblId,
+                    "ORG_ID": orgId,
+                    "TBL_NM": best.get("TBL_NM"),
+                    "ORG_NM": best.get("ORG_NM"),
+                },
+                "preview": dr.text[:500]
+            }
+        
+        elif agency == "law":
+            # 법령 검색 + 전문 조회 예시는 따로 구현 가능
+            return {"ok": False, "error": "법령 통합검색은 아직 구현되지 않음"}
+        
+        else:
+            return {"ok": False, "error": f"{agency} 검색 기능 미구현"}
+    
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
