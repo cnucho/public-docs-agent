@@ -57,3 +57,32 @@ def kosis_table_endpoint(orgId: str = Query(...), tblId: str = Query(...), start
     if not KOSIS_API_KEY:
         raise HTTPException(500, "환경변수 KOSIS_API_KEY가 설정되지 않았습니다.")
     return search_stats_table(KOSIS_API_KEY, orgId, tblId, start_year, end_year, prdSe, itmId)
+@app.get("/check_kosis")
+def check_kosis():
+    import requests
+    api_key = os.environ.get("KOSIS_API_KEY")
+    if not api_key:
+        return {"ok": False, "error": "환경변수 없음"}
+
+    url = (
+        "http://kosis.kr/openapi/Param/statisticsParameterData.do"
+        "?method=getList"
+        f"&apiKey={api_key}"
+        "&itmId=T1"
+        "&objL1=0"
+        "&objL2=0"
+        "&format=json"
+        "&prdSe=Y"
+        "&startPrdDe=2020"
+        "&endPrdDe=2020"
+    )
+
+    try:
+        r = requests.get(url, timeout=10)
+        return {
+            "ok": r.ok,
+            "status": r.status_code,
+            "preview": r.text[:200]
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
