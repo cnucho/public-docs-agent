@@ -1,0 +1,6 @@
+from typing import Protocol, Any, Dict
+
+class Provider(Protocol):
+    name: str
+    def search(self, **kwargs) -> Dict[str, Any]: ...
+    def fetch(self, **kwargs) -> Dict[str, Any]: ...
