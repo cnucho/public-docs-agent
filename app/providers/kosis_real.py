@@ -1,23 +1,79 @@
+# app/providers/kosis_real.py
+from __future__ import annotations
+import os
+import urllib.parse
 from typing import Any, Dict
-from .base import Provider
-from app.core.config import KOSIS_API_KEY
-from app.core.errors import fail
-from app.core.http import get, json_safe
+import httpx
+from fastapi import HTTPException
 
-class KOSIS(Provider):
+# 환경변수
+BASE = os.getenv("KOSIS_BASE_URL", "https://kosis.kr/openapi").rstrip("/")
+KEY  = os.getenv("KOSIS_API_KEY")
+KEY_PARAM = os.getenv("KOSIS_KEY_PARAM", "serviceKey")  # 일부 API는 apiKey
+TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "20"))
+
+if not KEY:
+    # registry에서 mock으로 빠지도록 하는 게 이상적이나, 여기서 명확히 에러
+    raise HTTPException(status_code=500, detail="KOSIS_API_KEY 누락")
+
+ENC_KEY = urllib.parse.quote(KEY, safe="")  # 1회만 인코딩
+
+class KosisRealProvider:
+    """KOSIS 실사용 프로바이더"""
+
     name = "kosis-real"
-    BASE = "http://kosis.kr/openapi/Param/statisticsParameterData.do"
 
-    def _key(self):
-        if not KOSIS_API_KEY:
-            fail("E_NO_KEY","KOSIS_API_KEY 없음", status=500)
-        return KOSIS_API_KEY
+    def __init__(self) -> None:
+        self.base = BASE
+        self.key_param = KEY_PARAM
 
-    def search(self, keyword: str, limit: int = 10, **_)->Dict[str,Any]:
-        r = get(self.BASE, params={"method":"getStatList","apiKey":self._key(),"format":"json","keyword":keyword})
-        if not r.ok:
-            fail("E_HTTP", "KOSIS 검색 실패", {"status": r.status_code, "raw": r.text}, 502)
-        data = json_safe(r.text)
+    def _get(self, path: str, params: Dict[str, Any]) -> httpx.Response:
+        if not path.startswith("/"):
+            path = "/" + path
+        url = f"{self.base}{path}"
+
+        q = dict(params or {})
+        # 중복 방지
+        q.pop("serviceKey", None)
+        q.pop("apiKey", None)
+        q[self.key_param] = ENC_KEY
+
+        with httpx.Client(timeout=TIMEOUT) as client:
+            r = client.get(url, params=q)
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail={
+                "url": str(r.url),
+                "status": r.status_code,
+                "text": r.text[:500],
+            })
+        return r
+
+    # ── 검색: 엔드포인트가 과제마다 달라서 최소 스텁 제공 ──
+    # 필요 시 '/statisticsParameterData.do'로 구현 확장
+    def search(self, keyword: str, limit: int = 10, **kwargs) -> Dict[str, Any]:
+        return {
+            "ok": True,
+            "results": [],
+            "note": "search는 프로젝트별 파라미터가 달라 스텁으로 둠. fetch로 실데이터 확인 권장.",
+        }
+
+    # ── 페치: 통상 '/statisticsData.do' 사용 ──
+    def fetch(self, path: str | None = None, **params) -> Dict[str, Any]:
+        # path 미지정 시 기본 본데이터 엔드포인트
+        path = path or "/statisticsData.do"
+        r = self._get(path, params)
+        ct = r.headers.get("content-type", "").lower()
+        if "json" in ct:
+            data = r.json()
+        else:
+            # CSV 등은 그대로 텍스트로
+            data = r.text
+        return {
+            "ok": True,
+            "data": data,
+            "source": str(r.url),
+        }
+
         if not isinstance(data, list):
             return {"ok": True, "count": 0, "results": []}
         results = [{
