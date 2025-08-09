@@ -107,24 +107,26 @@ def agency_search(
               count=len(items), items=items)
 
 from fastapi import Request, Query
+from app.core.errors import ok, fail
+from .providers.registry import get_provider
 
 @app.get("/agency/fetch")
 def agency_fetch(agency: str = Query(...), request: Request = None):
-    q = dict(request.query_params)   # 전체 쿼리 받음
-    q.pop("agency", None)            # agency만 제거
-    # 이후 q를 그대로 provider.fetch(**q) 또는 프록시로 전달
-    ...
-
     p = get_provider(agency)
     if not p:
         return fail("E_NO_AGENCY", f"지원하지 않는 기관: {agency}")
-    res = p.fetch(**params)
+
+    q = dict(request.query_params)   # 전체 쿼리 받기
+    q.pop("agency", None)            # agency만 제거
+
+    res = p.fetch(**q)               # 키는 서버에서 자동 주입
     if not res.get("ok"):
         return res
     items = res.get("data_preview") or res.get("items") or res.get("data") or []
     return ok(provider=getattr(p, "name", "?"),
-              query={"agency": agency, **params},
+              query={"agency": agency, **q},
               items=items, source=res.get("source"))
+
 
 # ===== 아래 두 엔드포인트는 반드시 최상위(왼쪽 정렬) =====
 @app.get("/health")
@@ -136,3 +138,27 @@ def diag_env():
     import os
     return {"KOSIS_API_KEY_set": bool(os.getenv("KOSIS_API_KEY"))}
 
+from fastapi import Request, Query
+import os, urllib.parse, requests
+from fastapi.responses import JSONResponse
+
+BASE = "https://kosis.kr/openapi"
+KEY  = os.getenv("KOSIS_API_KEY")
+
+def _kosis_get(path, params):
+    p = {"format":"json","jsonVD":"Y", **params}
+    p.pop("apiKey", None); p.pop("serviceKey", None)
+    p["apiKey"] = KEY  # 공식 파라미터명
+    url = BASE + (path if path.startswith("/") else "/" + path)
+    r = requests.get(url, params=p, timeout=20)
+    return JSONResponse(status_code=r.status_code, content=r.json() if "json" in r.headers.get("content-type","").lower() else r.text)
+
+@app.get("/kosis/parameter")
+def kosis_parameter(orgId: str = Query(...), tblId: str = Query(...), request: Request = None):
+    q = dict(request.query_params); q.pop("orgId", None); q.pop("tblId", None)
+    return _kosis_get("/Param/statisticsParameterData.do", {"method":"getList","orgId":orgId,"tblId":tblId, **q})
+
+@app.get("/kosis/data")
+def kosis_data(orgId: str = Query(...), tblId: str = Query(...), request: Request = None):
+    q = dict(request.query_params); q.pop("orgId", None); q.pop("tblId", None)
+    return _kosis_get("/statisticsData.do", {"method":"getList","orgId":orgId,"tblId":tblId, **q})
