@@ -205,50 +205,83 @@ def search(
     page: int = Query(1, ge=1),
 ):
     if agency.lower() != "kosis":
-        raise HTTPException(status_code=400, detail={"ok": False, "code": "E_ONLY_KOSIS", "message": "agency=kosis 만 지원"})
+        raise HTTPException(
+            status_code=400,
+            detail={"ok": False, "code": "E_ONLY_KOSIS", "message": "agency=kosis 만 지원"}
+        )
 
-    # config에 없을 때를 대비한 안전한 BASE/KEY
-    BASE = getattr(config, "KOSIS_BASE", os.getenv("KOSIS_BASE", "https://kosis.kr/openapi"))
-    API_KEY = getattr(config, "KOSIS_API_KEY", os.getenv("KOSIS_API_KEY", "")) or ""
-    if not API_KEY:
-        raise HTTPException(status_code=400, detail={"ok": False, "code": "E_NO_KEY", "message": "KOSIS_API_KEY not set"})
-
-    url = f"{BASE.rstrip('/')}/statisticsSearch.do"
+    url = f"{config.KOSIS_BASE.rstrip('/')}/statisticsSearch.do"
     start = (page - 1) * limit + 1  # 1-base
 
     params = {
         "method": "getList",
-        "apiKey": API_KEY,
+        "apiKey": config.KOSIS_API_KEY,
         "searchNm": q,
         "format": "json",
         "startCount": start,
         "resultCount": limit,
-        # 필요 시:
-        # "sort": "RANK",   # 또는 "DATE"
-        # "orgId": "101",
+        # "sort": "RANK",  # 필요 시
+        # "orgId": "101",  # 필요 시
     }
 
     try:
         r = requests.get(url, params=params, timeout=20, allow_redirects=False)
     except requests.RequestException as e:
-        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_UPSTREAM", "message": str(e)})
+        raise HTTPException(
+            status_code=502,
+            detail={"ok": False, "code": "E_UPSTREAM", "message": str(e)}
+        )
 
+    # 1) HTTP 상태 코드 확인
     if r.status_code != 200:
-        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_UPSTREAM_STATUS", "message": f"{r.status_code} {r.text[:200]}"})
+        raise HTTPException(
+            status_code=502,
+            detail={"ok": False, "code": "E_UPSTREAM_STATUS", "message": f"{r.status_code} {r.text[:200]}"}
+        )
 
-    # JSON 파싱 + KOSIS 에러 처리
     ct = (r.headers.get("content-type") or "").lower()
-    if "json" not in ct:
-        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_NOT_JSON", "message": r.text[:300]})
-    try:
-        data = r.json()
-    except ValueError:
-        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_BAD_JSON", "message": r.text[:300]})
+    body = r.text
 
+    # 2) 먼저 JSON 시도
+    data = None
+    if "json" in ct:
+        try:
+            data = r.json()
+        except ValueError:
+            data = None
+
+    # 3) JSON 실패 시: 에러 JSON 추출 시도
+    if data is None:
+        import re, json
+        m = re.search(r'\{[^{}]*"err"[^{}]*\}', body)
+        if m:
+            err_obj = json.loads(m.group(0))
+            raise HTTPException(
+                status_code=400,
+                detail={"ok": False, "code": f"KOSIS_{err_obj.get('err')}", "message": err_obj.get("errMsg")}
+            )
+
+        js_like = re.sub(r'([{,]\s*)([A-Z0-9_]+)\s*:', r'\1"\2":', body)
+        try:
+            data = json.loads(js_like)
+        except Exception:
+            raise HTTPException(
+                status_code=502,
+                detail={"ok": False, "code": "E_BAD_JSON", "message": body[:300]}
+            )
+
+    # 5) KOSIS 에러 포맷 정식 처리
     if isinstance(data, dict) and "err" in data:
-        raise HTTPException(status_code=400, detail={"ok": False, "code": f'KOSIS_{data.get("err")}', "message": data.get("errMsg")})
+        raise HTTPException(
+            status_code=400,
+            detail={"ok": False, "code": f"KOSIS_{data.get('err')}", "message": data.get("errMsg")}
+        )
 
     items = data if isinstance(data, list) else []
-    return ok(provider="kosis-real",
-              query={"agency": agency, "q": q, "limit": limit, "page": page, "startCount": start},
-              count=len(items), items=items)
+    return ok(
+        provider="kosis-real",
+        query={"agency": agency, "q": q, "limit": limit, "page": page, "startCount": start},
+        count=len(items),
+        items=items
+    )
+
