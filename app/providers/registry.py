@@ -1,10 +1,11 @@
+# app/providers/registry.py
 import os
-from .kosis_real import KosisRealProvider
-from .kosis_mock import KosisMockProvider
-from .law_mock import LawMockProvider
+
+def _kosis_mode() -> str:
+    return "real" if os.getenv("KOSIS_API_KEY") else "mock"
 
 MODES = {
-    "kosis": "real" if os.getenv("KOSIS_API_KEY") else "mock",
+    "kosis": _kosis_mode(),
     "law":   "mock",
     "nkis":  "mock",
 }
@@ -12,8 +13,15 @@ MODES = {
 def get_provider(name: str):
     n = (name or "").lower()
     if n == "kosis":
-        return KosisRealProvider() if MODES["kosis"] == "real" else KosisMockProvider()
+        if MODES["kosis"] == "real":
+            from .kosis_real import KosisRealProvider
+            return KosisRealProvider()
+        else:
+            from .kosis_mock import KosisMockProvider
+            return KosisMockProvider()
     if n == "law":
+        from .law_mock import LawMockProvider
         return LawMockProvider()
     raise ValueError(f"unknown provider: {name}")
+
 
