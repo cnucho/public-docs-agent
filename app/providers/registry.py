@@ -1,14 +1,19 @@
-# app/providers/registry.py
-from . import kosis  # app/providers/kosis.py 있어야 함
+import os
+from .kosis_real import KosisRealProvider
+from .kosis_mock import KosisMockProvider
+from .law_mock import LawMockProvider
 
-MODES = ["default"]
-
-PROVIDERS = {
-    "kosis": kosis,  # 반드시 "모듈"을 반환하도록 유지
+MODES = {
+    "kosis": "real" if os.getenv("KOSIS_API_KEY") else "mock",
+    "law":   "mock",
+    "nkis":  "mock",
 }
 
 def get_provider(name: str):
-    key = (name or "kosis").lower().strip()
-    if key not in PROVIDERS:
-        raise ValueError(f"Unsupported agency: {name}")
-    return PROVIDERS[key]  # 함수가 아니라 모듈
+    n = (name or "").lower()
+    if n == "kosis":
+        return KosisRealProvider() if MODES["kosis"] == "real" else KosisMockProvider()
+    if n == "law":
+        return LawMockProvider()
+    raise ValueError(f"unknown provider: {name}")
+
