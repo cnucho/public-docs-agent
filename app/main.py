@@ -39,8 +39,11 @@ def home():
 def healthz():
     return {"ok": True}
 
+from app.providers.registry import get_provider, MODES
+
 @app.get("/admin/status")
 def admin_status():
+    from app.core import config
     return {
         "modes": MODES,
         "keys": {
@@ -49,6 +52,7 @@ def admin_status():
             "NKIS_API_KEY":  bool(config.NKIS_API_KEY),
         }
     }
+
 
 @app.get("/admin/selftest")
 def admin_selftest(agency: str):
