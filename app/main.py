@@ -193,12 +193,21 @@ BASE = "https://kosis.kr/openapi"
 KEY  = os.getenv("KOSIS_API_KEY")
 
 def _kosis_get(path, params):
-    p = {"format":"json","jsonVD":"Y", **params}
+    # ✅ 데이터 조회(statisticsData.do)에만 jsonVD=Y 추가
+    if "statisticsData.do" in path:
+        p = {"format": "json", "jsonVD": "Y", **params}
+    else:
+        p = {"format": "json", **params}  # ❌ Param API엔 jsonVD 금지
+
     p.pop("apiKey", None); p.pop("serviceKey", None)
-    p["apiKey"] = KEY  # 공식 파라미터명
+    p["apiKey"] = KEY
+
     url = BASE + (path if path.startswith("/") else "/" + path)
-    r = requests.get(url, params=p, timeout=20)
-    return JSONResponse(status_code=r.status_code, content=r.json() if "json" in r.headers.get("content-type","").lower() else r.text)
+    r = requests.get(url, params=p, timeout=20, allow_redirects=False)
+    return JSONResponse(
+        status_code=r.status_code,
+        content=r.json() if "json" in (r.headers.get("content-type","").lower()) else r.text
+    )
 
 @app.get("/kosis/parameter")
 def kosis_parameter(orgId: str = Query(...), tblId: str = Query(...), request: Request = None):
