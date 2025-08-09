@@ -91,3 +91,10 @@ def agency_fetch(agency: str = Query(...), **params):
     if not res.get("ok"): return res
     items = res.get("data_preview") or res.get("items") or res.get("data") or []
     return ok(provider=getattr(p,"name","?"), query={"agency":agency, **params}, items=items, source=res.get("source"))
+    @app.get("/health")
+def health(): return {"ok": True}
+
+@app.get("/diag/env")
+def diag_env():
+    import os
+    return {"KOSIS_API_KEY_set": bool(os.getenv("KOSIS_API_KEY"))}
