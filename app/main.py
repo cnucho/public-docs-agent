@@ -108,19 +108,46 @@ def search(
         # "orgId": "101",  # 필요 시
     }
 
-    try:
-        r = requests.get(url, params=params, timeout=20)
+        try:
+        r = requests.get(url, params=params, timeout=20, allow_redirects=False)
     except requests.RequestException as e:
         raise HTTPException(status_code=502, detail={"ok": False, "code": "E_UPSTREAM", "message": str(e)})
 
+    # 1) HTTP 상태 코드 확인
     if r.status_code != 200:
         raise HTTPException(status_code=502, detail={"ok": False, "code": "E_UPSTREAM_STATUS", "message": f"{r.status_code} {r.text[:200]}"})
 
-    try:
-        data = r.json()
-    except ValueError:
-        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_BAD_JSON", "message": r.text[:200]})
+    ct = (r.headers.get("content-type") or "").lower()
+    body = r.text
 
+    # 2) 먼저 JSON 시도
+    data = None
+    if "json" in ct:
+        try:
+            data = r.json()
+        except ValueError:
+            data = None
+
+    # 3) JSON 실패 시: 에러 JSON 추출 시도
+    if data is None:
+        # KOSIS가 가끔 plain text로 에러 JSON을 덧붙여 보냄: {..."err"...}
+        import re, json
+        m = re.search(r'\{[^{}]*"err"[^{}]*\}', body)
+        if m:
+            err_obj = json.loads(m.group(0))
+            raise HTTPException(status_code=400, detail={"ok": False, "code": f"KOSIS_{err_obj.get('err')}", "message": err_obj.get("errMsg")})
+
+        # 4) 결과 배열이 JS-문법(키에 따옴표 없음)일 때 응급 파서
+        # 예: [{ORG_ID:"359",ORG_NM:"..."}]
+        # 키를 "KEY": 로 치환
+        js_like = re.sub(r'([{,]\s*)([A-Z0-9_]+)\s*:', r'\1"\2":', body)
+        try:
+            data = json.loads(js_like)
+        except Exception:
+            # 그래도 안 되면 원문 일부를 보고하도록 리턴
+            raise HTTPException(status_code=502, detail={"ok": False, "code": "E_BAD_JSON", "message": body[:300]})
+
+    # 5) KOSIS 에러 포맷 정식 처리
     if isinstance(data, dict) and "err" in data:
         raise HTTPException(status_code=400, detail={"ok": False, "code": f"KOSIS_{data.get('err')}", "message": data.get("errMsg")})
 
@@ -128,27 +155,6 @@ def search(
     return ok(provider="kosis-real",
               query={"agency": agency, "q": q, "limit": limit, "page": page, "startCount": start},
               count=len(items), items=items)
-
-from fastapi import Request, Query
-from app.core.errors import ok, fail
-from .providers.registry import get_provider
-
-@app.get("/agency/fetch")
-def agency_fetch(agency: str = Query(...), request: Request = None):
-    p = get_provider(agency)
-    if not p:
-        return fail("E_NO_AGENCY", f"지원하지 않는 기관: {agency}")
-
-    q = dict(request.query_params)   # 전체 쿼리 받기
-    q.pop("agency", None)            # agency만 제거
-
-    res = p.fetch(**q)               # 키는 서버에서 자동 주입
-    if not res.get("ok"):
-        return res
-    items = res.get("data_preview") or res.get("items") or res.get("data") or []
-    return ok(provider=getattr(p, "name", "?"),
-              query={"agency": agency, **q},
-              items=items, source=res.get("source"))
 
 
 # ===== 아래 두 엔드포인트는 반드시 최상위(왼쪽 정렬) =====
@@ -185,3 +191,64 @@ def kosis_parameter(orgId: str = Query(...), tblId: str = Query(...), request: R
 def kosis_data(orgId: str = Query(...), tblId: str = Query(...), request: Request = None):
     q = dict(request.query_params); q.pop("orgId", None); q.pop("tblId", None)
     return _kosis_get("/statisticsData.do", {"method":"getList","orgId":orgId,"tblId":tblId, **q})
+# --- GET /search: KOSIS 실검색 전용 ---
+import os, requests
+from fastapi import HTTPException, Query
+from app.core import config
+from app.core.errors import ok
+
+@app.get("/search")
+def search(
+    agency: str = Query(...),
+    q: str = Query(...),
+    limit: int = Query(20, ge=1, le=100),
+    page: int = Query(1, ge=1),
+):
+    if agency.lower() != "kosis":
+        raise HTTPException(status_code=400, detail={"ok": False, "code": "E_ONLY_KOSIS", "message": "agency=kosis 만 지원"})
+
+    # config에 없을 때를 대비한 안전한 BASE/KEY
+    BASE = getattr(config, "KOSIS_BASE", os.getenv("KOSIS_BASE", "https://kosis.kr/openapi"))
+    API_KEY = getattr(config, "KOSIS_API_KEY", os.getenv("KOSIS_API_KEY", "")) or ""
+    if not API_KEY:
+        raise HTTPException(status_code=400, detail={"ok": False, "code": "E_NO_KEY", "message": "KOSIS_API_KEY not set"})
+
+    url = f"{BASE.rstrip('/')}/statisticsSearch.do"
+    start = (page - 1) * limit + 1  # 1-base
+
+    params = {
+        "method": "getList",
+        "apiKey": API_KEY,
+        "searchNm": q,
+        "format": "json",
+        "startCount": start,
+        "resultCount": limit,
+        # 필요 시:
+        # "sort": "RANK",   # 또는 "DATE"
+        # "orgId": "101",
+    }
+
+    try:
+        r = requests.get(url, params=params, timeout=20, allow_redirects=False)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_UPSTREAM", "message": str(e)})
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_UPSTREAM_STATUS", "message": f"{r.status_code} {r.text[:200]}"})
+
+    # JSON 파싱 + KOSIS 에러 처리
+    ct = (r.headers.get("content-type") or "").lower()
+    if "json" not in ct:
+        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_NOT_JSON", "message": r.text[:300]})
+    try:
+        data = r.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_BAD_JSON", "message": r.text[:300]})
+
+    if isinstance(data, dict) and "err" in data:
+        raise HTTPException(status_code=400, detail={"ok": False, "code": f'KOSIS_{data.get("err")}', "message": data.get("errMsg")})
+
+    items = data if isinstance(data, list) else []
+    return ok(provider="kosis-real",
+              query={"agency": agency, "q": q, "limit": limit, "page": page, "startCount": start},
+              count=len(items), items=items)
