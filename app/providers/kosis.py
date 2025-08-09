@@ -1,23 +1,23 @@
 # app/providers/kosis.py
-# 최소 동작용 스텁. 나중에 실제 KOSIS API 호출로 교체 가능.
+# main.py에서 p.search(keyword=...), p.fetch(**params)로 호출하므로 여기에 맞춰 구현
 
-from typing import Dict, Any, List, Optional
+name = "kosis"
 
-def search(q: str, limit: int = 10, **kwargs) -> Dict[str, Any]:
-    """/agency/search에서 호출. q는 검색어."""
-    items: List[Dict[str, Any]] = [
-        {"id": "demo-1", "title": f"[예시] {q} 관련 지표 1", "url": "https://kosis.kr"},
-        {"id": "demo-2", "title": f"[예시] {q} 관련 지표 2", "url": "https://kosis.kr"},
+def search(keyword: str, limit: int = 10, **kwargs):
+    # 최소 동작용 모의응답. 실제 API 연동은 추후 교체.
+    items = [
+        {"id": "DT_DEMO_001", "title": f"[KOSIS] {keyword} 관련 지표 1", "url": "https://kosis.kr"},
+        {"id": "DT_DEMO_002", "title": f"[KOSIS] {keyword} 관련 지표 2", "url": "https://kosis.kr"},
     ][:limit]
-    return {"ok": True, "source": "kosis", "count": len(items), "items": items}
+    return {"ok": True, "results": items}
 
-def fetch(id: Optional[str] = None, url: Optional[str] = None, **kwargs) -> Dict[str, Any]:
-    """/agency/fetch에서 호출. id 또는 url을 받는다고 가정."""
+def fetch(**params):
+    # orgId, tblId 등 어떤 키가 와도 에러 없이 통과
     return {
         "ok": True,
-        "source": "kosis",
-        "id": id or "demo-1",
-        "url": url or "https://kosis.kr",
-        "title": "샘플 상세 결과",
-        "content": "이곳에 실제 KOSIS 응답 파싱 내용을 넣으면 됩니다.",
+        "data_preview": [
+            {"col": "예시열1", "val": 123},
+            {"col": "예시열2", "val": 456},
+        ],
+        "echo": params,  # 무엇이 왔는지 확인용
     }
