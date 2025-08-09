@@ -19,7 +19,7 @@ async def all_errors(request: Request, exc: Exception):
         return JSONResponse(status_code=exc.status_code, content=exc.detail)
     return JSONResponse(status_code=500, content={"ok": False, "code": "E_INTERNAL", "message": str(exc)})
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def home():
     return {
         "message": f"{config.APP_NAME} API 입니다.",
@@ -34,16 +34,15 @@ def home():
             "/diag/env": "환경변수 확인",
         }
     }
-
-@app.get("/healthz")
+@app.api_route("/healthz", methods=["GET", "HEAD"])
 def healthz():
     return {"ok": True}
 
-from app.providers.registry import get_provider, MODES
+# 이미 상단에서: from .providers.registry import get_provider, MODES
+# (또는 프로젝트 구조에 맞게 app.providers...로 일관)
 
 @app.get("/admin/status")
 def admin_status():
-    from app.core import config
     return {
         "modes": MODES,
         "keys": {
@@ -52,6 +51,7 @@ def admin_status():
             "NKIS_API_KEY":  bool(config.NKIS_API_KEY),
         }
     }
+
 
 
 @app.get("/admin/selftest")
@@ -78,32 +78,55 @@ def admin_selftest(agency: str):
     except Exception as e:
         return {"ok": False, "error": str(e), "provider": getattr(p, "name", "?")}
 
-@app.get("/agency/search")
-def agency_search(
+# --- GET /search: KOSIS 실검색 ---
+import requests
+from fastapi import HTTPException, Query
+from app.core import config
+from app.core.errors import ok
+
+@app.get("/search")
+def search(
     agency: str = Query(...),
     q: str = Query(...),
-    limit: int = 10,
-    cursor: str | None = None,
-    sort: str | None = None
+    limit: int = Query(20, ge=1, le=100),
+    page: int = Query(1, ge=1),
 ):
-    p = get_provider(agency)
-    if not p:
-        return fail("E_NO_AGENCY", f"지원하지 않는 기관: {agency}")
+    if agency.lower() != "kosis":
+        raise HTTPException(status_code=400, detail={"ok": False, "code": "E_ONLY_KOSIS", "message": "agency=kosis 만 지원"})
 
-    if agency.lower() == "kosis":
-        res = p.search(keyword=q, limit=limit)
-    elif agency.lower() == "law":
-        res = p.search(query=q, page=1, display=limit)
-    elif agency.lower() == "nkis":
-        res = p.search(keyword=q, pageNo=1, rowCnt=limit)
-    else:
-        return fail("E_ROUTE", "라우팅 실패")
+    url = f"{config.KOSIS_BASE.rstrip('/')}/statisticsSearch.do"
+    start = (page - 1) * limit + 1  # 1-base
 
-    if not res.get("ok"):
-        return res
-    items = res.get("results") or res.get("data") or res.get("items") or []
-    return ok(provider=getattr(p, "name", "?"),
-              query={"agency": agency, "q": q, "limit": limit},
+    params = {
+        "method": "getList",
+        "apiKey": config.KOSIS_API_KEY,
+        "searchNm": q,
+        "format": "json",
+        "startCount": start,
+        "resultCount": limit,
+        # "sort": "RANK",  # 필요 시
+        # "orgId": "101",  # 필요 시
+    }
+
+    try:
+        r = requests.get(url, params=params, timeout=20)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_UPSTREAM", "message": str(e)})
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_UPSTREAM_STATUS", "message": f"{r.status_code} {r.text[:200]}"})
+
+    try:
+        data = r.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail={"ok": False, "code": "E_BAD_JSON", "message": r.text[:200]})
+
+    if isinstance(data, dict) and "err" in data:
+        raise HTTPException(status_code=400, detail={"ok": False, "code": f"KOSIS_{data.get('err')}", "message": data.get("errMsg")})
+
+    items = data if isinstance(data, list) else []
+    return ok(provider="kosis-real",
+              query={"agency": agency, "q": q, "limit": limit, "page": page, "startCount": start},
               count=len(items), items=items)
 
 from fastapi import Request, Query
