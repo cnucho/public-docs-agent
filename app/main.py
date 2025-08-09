@@ -108,7 +108,7 @@ def search(
         # "orgId": "101",  # 필요 시
     }
 
-        try:
+    try:
         r = requests.get(url, params=params, timeout=20, allow_redirects=False)
     except requests.RequestException as e:
         raise HTTPException(status_code=502, detail={"ok": False, "code": "E_UPSTREAM", "message": str(e)})
