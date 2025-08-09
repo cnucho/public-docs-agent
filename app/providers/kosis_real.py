@@ -1,8 +1,8 @@
 from typing import Any, Dict
 from .base import Provider
-from core.config import KOSIS_API_KEY
-from core.errors import fail
-from core.http import get, json_safe
+from app.core.config import KOSIS_API_KEY
+from app.core.errors import fail
+from app.core.http import get, json_safe
 
 class KOSIS(Provider):
     name = "kosis-real"

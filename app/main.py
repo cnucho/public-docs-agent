@@ -1,9 +1,9 @@
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from core import config
-from core.errors import ok, fail
-from providers.registry import get_provider, MODES
+from app.core import config
+from app.core.errors import ok, fail
+from app.providers.registry import get_provider, MODES
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VER, description="공공문서 통합 API")
 
