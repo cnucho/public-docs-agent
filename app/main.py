@@ -30,6 +30,8 @@ def home():
             "/healthz": "상태 점검",
             "/admin/status": "현재 어댑터/키 상태",
             "/admin/selftest": "간단 스모크테스트",
+            "/health": "헬스체크",
+            "/diag/env": "환경변수 확인",
         }
     }
 
@@ -51,50 +53,75 @@ def admin_status():
 @app.get("/admin/selftest")
 def admin_selftest(agency: str):
     p = get_provider(agency)
-    if not p: return {"ok": False, "message": "no such agency"}
+    if not p:
+        return {"ok": False, "message": "no such agency"}
     try:
-        if agency.lower()=="kosis":
+        if agency.lower() == "kosis":
             s = p.search(keyword="전기차")
             f = p.fetch(orgId="101", tblId="DT_MOCK_001")
-        elif agency.lower()=="law":
+        elif agency.lower() == "law":
             s = p.search(query="전기차")
             f = p.fetch()
         else:
             s = p.search(keyword="전기차")
             f = p.fetch(otpId="M1", otpSeq="1")
-        return {"ok": bool(s.get("ok")), "search_ok": s.get("ok"), "fetch_ok": (f or {}).get("ok", None), "provider": getattr(p,"name","?")}
+        return {
+            "ok": bool(s.get("ok")),
+            "search_ok": s.get("ok"),
+            "fetch_ok": (f or {}).get("ok", None),
+            "provider": getattr(p, "name", "?"),
+        }
     except Exception as e:
-        return {"ok": False, "error": str(e), "provider": getattr(p,"name","?")}
+        return {"ok": False, "error": str(e), "provider": getattr(p, "name", "?")}
 
 @app.get("/agency/search")
-def agency_search(agency: str = Query(...), q: str = Query(...), limit: int = 10, cursor: str | None = None, sort: str | None = None):
+def agency_search(
+    agency: str = Query(...),
+    q: str = Query(...),
+    limit: int = 10,
+    cursor: str | None = None,
+    sort: str | None = None
+):
     p = get_provider(agency)
-    if not p: return fail("E_NO_AGENCY", f"지원하지 않는 기관: {agency}")
-    if agency.lower()=="kosis":
+    if not p:
+        return fail("E_NO_AGENCY", f"지원하지 않는 기관: {agency}")
+
+    if agency.lower() == "kosis":
         res = p.search(keyword=q, limit=limit)
-    elif agency.lower()=="law":
+    elif agency.lower() == "law":
         res = p.search(query=q, page=1, display=limit)
-    elif agency.lower()=="nkis":
+    elif agency.lower() == "nkis":
         res = p.search(keyword=q, pageNo=1, rowCnt=limit)
     else:
         return fail("E_ROUTE", "라우팅 실패")
 
-    if not res.get("ok"): return res
+    if not res.get("ok"):
+        return res
     items = res.get("results") or res.get("data") or res.get("items") or []
-    return ok(provider=getattr(p,"name","?"), query={"agency":agency,"q":q,"limit":limit}, count=len(items), items=items)
+    return ok(provider=getattr(p, "name", "?"),
+              query={"agency": agency, "q": q, "limit": limit},
+              count=len(items), items=items)
 
 @app.get("/agency/fetch")
 def agency_fetch(agency: str = Query(...), **params):
     p = get_provider(agency)
-    if not p: return fail("E_NO_AGENCY", f"지원하지 않는 기관: {agency}")
+    if not p:
+        return fail("E_NO_AGENCY", f"지원하지 않는 기관: {agency}")
     res = p.fetch(**params)
-    if not res.get("ok"): return res
+    if not res.get("ok"):
+        return res
     items = res.get("data_preview") or res.get("items") or res.get("data") or []
-    return ok(provider=getattr(p,"name","?"), query={"agency":agency, **params}, items=items, source=res.get("source"))
-    @app.get("/health")
-def health(): return {"ok": True}
+    return ok(provider=getattr(p, "name", "?"),
+              query={"agency": agency, **params},
+              items=items, source=res.get("source"))
+
+# ===== 아래 두 엔드포인트는 반드시 최상위(왼쪽 정렬) =====
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 @app.get("/diag/env")
 def diag_env():
     import os
     return {"KOSIS_API_KEY_set": bool(os.getenv("KOSIS_API_KEY"))}
+
