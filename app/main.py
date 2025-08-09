@@ -106,8 +106,15 @@ def agency_search(
               query={"agency": agency, "q": q, "limit": limit},
               count=len(items), items=items)
 
+from fastapi import Request, Query
+
 @app.get("/agency/fetch")
-def agency_fetch(agency: str = Query(...), **params):
+def agency_fetch(agency: str = Query(...), request: Request = None):
+    q = dict(request.query_params)   # 전체 쿼리 받음
+    q.pop("agency", None)            # agency만 제거
+    # 이후 q를 그대로 provider.fetch(**q) 또는 프록시로 전달
+    ...
+
     p = get_provider(agency)
     if not p:
         return fail("E_NO_AGENCY", f"지원하지 않는 기관: {agency}")
