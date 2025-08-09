@@ -1,4 +1,14 @@
-from . import kosis  # 반드시 app/providers/kosis.py 있어야 함
+# app/providers/registry.py
+from . import kosis  # app/providers/kosis.py 있어야 함
+
+MODES = ["default"]
+
+PROVIDERS = {
+    "kosis": kosis,  # 반드시 "모듈"을 반환하도록 유지
+}
 
 def get_provider(name: str):
-    return kosis  # 함수 말고 모듈 반환
+    key = (name or "kosis").lower().strip()
+    if key not in PROVIDERS:
+        raise ValueError(f"Unsupported agency: {name}")
+    return PROVIDERS[key]  # 함수가 아니라 모듈
